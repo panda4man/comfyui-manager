@@ -1,0 +1,45 @@
+# Environment
+.env
+.env.local
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Logs
+*.log
+logs/
+
+# Cache and downloads
+.cache/
+cache/
+downloads/
+*.tmp
+
+# Compiled Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+
+# Virtual environments
+venv/
+env/
+.conda/
+
+# ComfyUI specific
+models/
+ComfyUI/
+.comfyui-cache/
