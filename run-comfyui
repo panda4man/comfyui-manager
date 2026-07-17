@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+set -e
+
+source "$(dirname "$0")/config.sh"
+
+source /opt/homebrew/Caskroom/miniconda/base/etc/profile.d/conda.sh
+conda activate "$CONDA_ENV"
+
+cd "$COMFY_DIR"
+
+exec python main.py \
+  --listen "$LISTEN_ADDRESS" \
+  --port "$LISTEN_PORT"
