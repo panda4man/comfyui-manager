@@ -7,6 +7,12 @@ type=""
 url=""
 name=""
 
+# Populated as a side effect of civitai_to_url() when jq is available.
+# Reset at the top of download_model() so nothing leaks across --batch entries.
+CIVITAI_SHA256=""
+CIVITAI_FILENAME=""
+CIVITAI_SIZE_KB=""
+
 get_model_dir() {
   case "$1" in
     checkpoint) echo "models/checkpoints" ;;
@@ -76,13 +82,31 @@ civitai_to_url() {
     local model_id="${BASH_REMATCH[1]}"
     echo "Fetching CivitAI model info..." >&2
 
+    local api_response
+    api_response=$(curl -fsSL "https://civitai.com/api/v1/models/$model_id" 2>/dev/null)
+
     # Use CivitAI API to get latest model version's download URL
     local download_url
     if command -v jq >/dev/null 2>&1; then
-      download_url=$(curl -fsSL "https://civitai.com/api/v1/models/$model_id" 2>/dev/null | jq -r '.modelVersions[0].downloadUrl' 2>/dev/null)
+      download_url=$(echo "$api_response" | jq -r '.modelVersions[0].downloadUrl' 2>/dev/null || true)
+
+      # Prefer the file flagged primary, fall back to the first file listed
+      local file_json
+      file_json=$(echo "$api_response" | jq -c '.modelVersions[0].files[]? | select(.primary == true)' 2>/dev/null || true)
+      if [[ -z "$file_json" ]]; then
+        file_json=$(echo "$api_response" | jq -c '.modelVersions[0].files[0]?' 2>/dev/null || true)
+      fi
+
+      if [[ -n "$file_json" && "$file_json" != "null" ]]; then
+        CIVITAI_SHA256=$(echo "$file_json" | jq -r '.hashes.SHA256 // empty' 2>/dev/null || true)
+        CIVITAI_FILENAME=$(echo "$file_json" | jq -r '.name // empty' 2>/dev/null || true)
+        CIVITAI_SIZE_KB=$(echo "$file_json" | jq -r '.sizeKB // empty' 2>/dev/null || true)
+      fi
     else
-      # Fallback without jq: grep for downloadUrl field
-      download_url=$(curl -fsSL "https://civitai.com/api/v1/models/$model_id" 2>/dev/null | grep -oP '"downloadUrl":"[^"]*' | head -1 | cut -d'"' -f4)
+      # Fallback without jq: grep for downloadUrl field.
+      # CIVITAI_SHA256/CIVITAI_FILENAME/CIVITAI_SIZE_KB stay empty; callers
+      # (checksum verification, dedup, disk-space check) degrade gracefully.
+      download_url=$(echo "$api_response" | grep -oP '"downloadUrl":"[^"]*' | head -1 | cut -d'"' -f4)
     fi
 
     if [[ -n "$download_url" && "$download_url" != "null" ]]; then
@@ -98,7 +122,72 @@ civitai_to_url() {
   echo "$url"
 }
 
+# Verify a downloaded file's SHA256 against an expected hash (case-insensitive).
+# If no expected hash is known, this is a no-op success (degrade gracefully).
+verify_checksum() {
+  local file="$1"
+  local expected_sha256="$2"
+
+  if [[ -z "$expected_sha256" ]]; then
+    echo "No checksum available, skipping verification"
+    return 0
+  fi
+
+  local actual_sha256
+  actual_sha256=$(shasum -a 256 "$file" | awk '{print $1}')
+
+  local actual_lc expected_lc
+  actual_lc=$(echo "$actual_sha256" | tr '[:upper:]' '[:lower:]')
+  expected_lc=$(echo "$expected_sha256" | tr '[:upper:]' '[:lower:]')
+
+  if [[ "$actual_lc" != "$expected_lc" ]]; then
+    echo "✗ Checksum mismatch for $file"
+    echo "  Expected: $expected_sha256"
+    echo "  Actual:   $actual_sha256"
+    return 1
+  fi
+
+  echo "✓ Checksum verified"
+  return 0
+}
+
+# Ensure there is enough free space in $dir for a download of roughly
+# $needed_kb (KB). If $needed_kb is unknown, fall back to a static floor
+# (2GB). A ~10% safety margin is always added on top.
+check_disk_space() {
+  local dir="$1"
+  local needed_kb="${2:-}"
+
+  # Normalize a possible float (e.g. CivitAI sizeKB) to an integer.
+  needed_kb="${needed_kb%%.*}"
+
+  local floor_kb=2097152 # 2GB, used when the size can't be determined
+  if [[ -z "$needed_kb" || ! "$needed_kb" =~ ^[0-9]+$ ]]; then
+    needed_kb=$floor_kb
+  fi
+
+  local available_kb
+  available_kb=$(df -Pk "$dir" | awk 'NR==2 {print $4}')
+
+  local needed_with_margin=$(( needed_kb + needed_kb / 10 ))
+
+  if (( available_kb < needed_with_margin )); then
+    local avail_mb needed_mb
+    avail_mb=$(( available_kb / 1024 ))
+    needed_mb=$(( needed_with_margin / 1024 ))
+    echo "✗ Not enough disk space in $dir (available: ${avail_mb}MB, required: ~${needed_mb}MB)" >&2
+    return 1
+  fi
+
+  return 0
+}
+
 download_model() {
+  # Reset CivitAI globals so a stale value can't leak between --batch entries.
+  CIVITAI_SHA256=""
+  CIVITAI_FILENAME=""
+  CIVITAI_SIZE_KB=""
+
   local type="$1"
   local url="$2"
   local custom_name="${3:-}"
@@ -138,12 +227,45 @@ download_model() {
 
   local filepath="$target_dir/$filename"
 
+  # Dedup: skip if we already have this file.
+  if [[ "$is_civitai" != "true" ]]; then
+    if [[ -f "$filepath" ]]; then
+      echo "✓ Already exists: $filename (skipping)"
+      return 0
+    fi
+  elif [[ -n "$CIVITAI_FILENAME" ]]; then
+    # CivitAI filename is normally only known post-download; the API lookup
+    # in civitai_to_url() gives us it early when jq is available.
+    local civitai_candidate="$target_dir/$CIVITAI_FILENAME"
+    if [[ -f "$civitai_candidate" ]]; then
+      echo "✓ Already exists: $CIVITAI_FILENAME (skipping)"
+      return 0
+    fi
+  fi
+
   echo "Downloading from: $(echo "$url" | sed 's|^https://||' | cut -d'/' -f1)"
   echo "  Type: $type"
   echo "  Destination: $target_dir/"
 
   # Create target dir
   mkdir -p "$DOWNLOAD_DIR" "$target_dir"
+
+  # Disk-space guard: abort this download (not the whole batch) if there
+  # isn't enough room, with a ~10% safety margin.
+  local needed_kb=""
+  if [[ "$is_civitai" == "true" ]]; then
+    needed_kb="$CIVITAI_SIZE_KB"
+  else
+    local content_length_bytes
+    content_length_bytes=$(curl -sIL "$url" 2>/dev/null | awk '/[Cc]ontent-[Ll]ength/{print $2}' | tail -1 | tr -d '\r\n')
+    if [[ "$content_length_bytes" =~ ^[0-9]+$ ]]; then
+      needed_kb=$(( content_length_bytes / 1024 ))
+    fi
+  fi
+
+  if ! check_disk_space "$target_dir" "$needed_kb"; then
+    return 1
+  fi
 
   # Download with progress
   local downloaded=false
@@ -186,6 +308,10 @@ download_model() {
   fi
 
   if [[ "$downloaded" == "true" ]]; then
+    if ! verify_checksum "$filepath" "$CIVITAI_SHA256"; then
+      rm -f "$filepath"
+      return 1
+    fi
     echo "✓ Downloaded: $filename"
     return 0
   else
@@ -224,7 +350,15 @@ while [[ $# -gt 0 ]]; do
       # Read from stdin: type url [name]
       while read -r line; do
         [[ -z "$line" || "$line" =~ ^# ]] && continue
-        read -r type url name <<< "$line" || { type="$url"; url="$name"; name=""; }
+        # Quote-aware tokenizing (so a quoted name/url with spaces survives)
+        # without eval, which would execute $()/backticks in the input.
+        # (Uses a read loop rather than mapfile/readarray: this repo targets
+        # stock macOS bash, which is 3.2 and predates those bash-4 builtins.)
+        _fields=()
+        while IFS= read -r _field; do
+          _fields+=("$_field")
+        done < <(printf '%s\n' "$line" | xargs -n1 2>/dev/null)
+        type="${_fields[0]:-}"; url="${_fields[1]:-}"; name="${_fields[2]:-}"
         download_model "$type" "$url" "$name" || true
       done
       exit 0

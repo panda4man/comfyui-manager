@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>{{LABEL}}</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/bin/bash</string>
+		<string>{{RUN_SCRIPT}}</string>
+	</array>
+	<key>WorkingDirectory</key>
+	<string>{{COMFY_DIR}}</string>
+	<key>EnvironmentVariables</key>
+	<dict>
+		<key>LISTEN_ADDRESS</key>
+		<string>{{LISTEN_ADDRESS}}</string>
+		<key>LISTEN_PORT</key>
+		<string>{{LISTEN_PORT}}</string>
+		<key>CONDA_ENV</key>
+		<string>{{CONDA_ENV}}</string>
+		<key>COMFY_DIR</key>
+		<string>{{COMFY_DIR}}</string>
+	</dict>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>KeepAlive</key>
+	<true/>
+	<key>StandardOutPath</key>
+	<string>{{LOG_FILE}}</string>
+	<key>StandardErrorPath</key>
+	<string>{{ERROR_LOG_FILE}}</string>
+</dict>
+</plist>

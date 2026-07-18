@@ -19,6 +19,9 @@ nano .env  # Set COMFY_DIR, CIVITAI_API_KEY if needed
 # Install ComfyUI
 ./install-comfyui.sh
 
+# Render and install the LaunchAgent plist from config/
+make install-plist
+
 # Load LaunchAgent (runs at login, starts on demand)
 make load
 
@@ -43,6 +46,9 @@ Does:
 6. Write `~/run-comfyui.sh` launcher
 
 Output: ComfyUI at `$COMFY_DIR` (default: `~/Dev/AI/ComfyUI`).
+
+Then run `make install-plist` to render `config/com.local.run-comfyui.plist.template`
+into `~/Library/LaunchAgents/com.local.run-comfyui.plist` before `make load`.
 
 ## Configuration
 
@@ -171,6 +177,7 @@ lsof -nP -iTCP:8188 -sTCP:LISTEN
 
 **LaunchAgent not starting?**
 ```bash
+make install-plist  # (re)render the plist from config/ if it's missing or stale
 make validate-plist
 launchctl print gui/$(id -u)/com.local.run-comfyui
 ```
