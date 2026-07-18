@@ -53,15 +53,15 @@ status:
 	@launchctl print "$(SERVICE)"
 
 logs:
-	@tail -f "$(HOME)/Library/Logs/comfyui.log"
+	@tail -f "$(HOME)/Library/Logs/ComfyUI/comfyui.log"
 
 errors:
-	@tail -f "$(HOME)/Library/Logs/comfyui.error.log"
+	@tail -f "$(HOME)/Library/Logs/ComfyUI/comfyui-error.log"
 
 logs-all:
 	@tail -f \
-		"$(HOME)/Library/Logs/comfyui.log" \
-		"$(HOME)/Library/Logs/comfyui.error.log"
+		"$(HOME)/Library/Logs/ComfyUI/comfyui.log" \
+		"$(HOME)/Library/Logs/ComfyUI/comfyui-error.log"
 
 check-port:
 	@lsof -nP -iTCP:$(PORT) -sTCP:LISTEN || true

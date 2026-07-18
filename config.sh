@@ -17,9 +17,9 @@ fi
 : "${PYTHON_VERSION:=3.12}"
 : "${LISTEN_ADDRESS:=0.0.0.0}"
 : "${LISTEN_PORT:=8188}"
-: "${LOG_DIR:=$HOME/Library/Logs}"
+: "${LOG_DIR:=$HOME/Library/Logs/ComfyUI}"
 : "${LOG_FILE:=$LOG_DIR/comfyui.log}"
-: "${ERROR_LOG_FILE:=$LOG_DIR/comfyui.error.log}"
+: "${ERROR_LOG_FILE:=$LOG_DIR/comfyui-error.log}"
 : "${DOWNLOAD_DIR:=$HOME/.cache/comfy-downloads}"
 
 # Set additional defaults
